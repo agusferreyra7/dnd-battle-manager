@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+/node_modules/
+/package-lock.json
+node_modules
+/public/.DS_Store
