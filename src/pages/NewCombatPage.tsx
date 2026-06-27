@@ -7,16 +7,20 @@ import {
 import { notifications } from '@mantine/notifications'
 import {
   IconTrash, IconDice, IconSword, IconShield,
-  IconArrowRight, IconUser, IconSkull
+  IconArrowRight, IconUser, IconSkull, IconBooks
 } from '@tabler/icons-react'
 import { createCombat, addParticipant, rollInitiative, setCombatStatus } from '@/db/queries'
+import { abilityModifier } from '@/services/open5e'
 import type { ParticipantFormValues } from '@/types'
 import ParticipantForm from '@/components/CombatSetup/ParticipantForm'
+import CharacterPicker, { type PickedCharacter } from '@/components/CombatSetup/CharacterPicker'
 
-// ─── Pending participant (not yet saved to DB) ────────────────────────────────
+// ─── Pending participant ───────────────────────────────────────────────────────
 
 interface PendingParticipant extends ParticipantFormValues {
   tempId: string
+  // set when created from a saved sheet
+  characterSheetId: string | null
 }
 
 // ─── Draft row card ───────────────────────────────────────────────────────────
@@ -31,34 +35,36 @@ function DraftParticipantCard({
   onRollInitiative: (id: string) => void
 }) {
   const isAdventurer = participant.type === 'adventurer'
+  const fromLibrary  = !!participant.characterSheetId
 
   return (
     <Card withBorder padding="sm" radius="md">
       <Group justify="space-between" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap">
-          <Stack gap={2}>
-            <Group gap="xs">
-              <Text fw={600} size="sm">{participant.name}</Text>
-              <Badge
-                color={isAdventurer ? 'blue' : 'red'}
-                variant="light"
-                size="xs"
-                leftSection={isAdventurer ? <IconUser size={10} /> : <IconSkull size={10} />}
-              >
-                {isAdventurer ? 'Aventurero' : 'Monstruo'}
-              </Badge>
-            </Group>
-            <Group gap="md">
-              <Text size="xs" c="dimmed">HP: {participant.maxHp}</Text>
-              <Text size="xs" c="dimmed">CA: {participant.armorClass}</Text>
-              <Text size="xs" c="dimmed">
-                Iniciativa: {participant.initiative !== null
-                  ? participant.initiative
-                  : `+${participant.initiativeBonus} (sin tirar)`}
-              </Text>
-            </Group>
-          </Stack>
-        </Group>
+        <Stack gap={2}>
+          <Group gap="xs">
+            <Text fw={600} size="sm">{participant.name}</Text>
+            <Badge
+              color={isAdventurer ? 'blue' : 'red'}
+              variant="light"
+              size="xs"
+              leftSection={isAdventurer ? <IconUser size={10} /> : <IconSkull size={10} />}
+            >
+              {isAdventurer ? 'Aventurero' : 'Monstruo'}
+            </Badge>
+            {fromLibrary && (
+              <Badge color="violet" variant="dot" size="xs">Biblioteca</Badge>
+            )}
+          </Group>
+          <Group gap="md">
+            <Text size="xs" c="dimmed">HP: {participant.maxHp}</Text>
+            <Text size="xs" c="dimmed">CA: {participant.armorClass}</Text>
+            <Text size="xs" c="dimmed">
+              Iniciativa: {participant.initiative !== null
+                ? participant.initiative
+                : `bono ${participant.initiativeBonus >= 0 ? '+' : ''}${participant.initiativeBonus}`}
+            </Text>
+          </Group>
+        </Stack>
 
         <Group gap="xs" wrap="nowrap">
           <ActionIcon
@@ -88,26 +94,58 @@ function DraftParticipantCard({
 
 export default function NewCombatPage() {
   const navigate = useNavigate()
-  const [combatName, setCombatName] = useState('')
-  const [pending, setPending] = useState<PendingParticipant[]>([])
+  const [combatName, setCombatName]   = useState('')
+  const [pending, setPending]         = useState<PendingParticipant[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [activeTab, setActiveTab] = useState<string | null>('adventurer')
+  const [activeTab, setActiveTab]     = useState<string | null>('library')
 
-  const handleAddParticipant = useCallback((batch: ParticipantFormValues[]) => {
-    const newEntries = batch.map((values) => ({
+  // ── Add from manual form ──────────────────────────────────────────────────
+
+  const handleAddManual = useCallback((batch: ParticipantFormValues[]) => {
+    const entries = batch.map(values => ({
       ...values,
       tempId: crypto.randomUUID(),
+      characterSheetId: null,
     }))
-    setPending((prev) => [...prev, ...newEntries])
+    setPending(prev => [...prev, ...entries])
   }, [])
 
+  // ── Add from library picker ───────────────────────────────────────────────
+
+  const handleAddFromLibrary = useCallback((picked: PickedCharacter) => {
+    const { sheet, initiative } = picked
+    const dexMod = sheet.abilityScores
+      ? abilityModifier(sheet.abilityScores.dexterity)
+      : 0
+    const type = sheet.type === 'adventurer' ? 'adventurer' as const : 'monster' as const
+
+    const entry: PendingParticipant = {
+      tempId:           crypto.randomUUID(),
+      characterSheetId: sheet.id,
+      type,
+      name:             sheet.name,
+      maxHp:            sheet.maxHp,
+      armorClass:       sheet.armorClass,
+      initiativeBonus:  dexMod,
+      initiative,
+      notes:            sheet.notes,
+    }
+    setPending(prev => [...prev, entry])
+    notifications.show({
+      message: `${sheet.name} añadido`,
+      color: type === 'adventurer' ? 'blue' : 'red',
+    })
+  }, [])
+
+  // ── Remove / reroll ───────────────────────────────────────────────────────
+
   const handleRemove = useCallback((tempId: string) => {
-    setPending((prev) => prev.filter((p) => p.tempId !== tempId))
+    setPending(prev => prev.filter(p => p.tempId !== tempId))
   }, [])
 
   const handleRollOne = useCallback((tempId: string) => {
-    setPending((prev) =>
-      prev.map((p) =>
+    setPending(prev =>
+      prev.map(p =>
         p.tempId === tempId
           ? { ...p, initiative: rollInitiative(p.initiativeBonus) }
           : p
@@ -116,11 +154,11 @@ export default function NewCombatPage() {
   }, [])
 
   const handleRollAll = useCallback(() => {
-    setPending((prev) =>
-      prev.map((p) => ({ ...p, initiative: rollInitiative(p.initiativeBonus) }))
-    )
+    setPending(prev => prev.map(p => ({ ...p, initiative: rollInitiative(p.initiativeBonus) })))
     notifications.show({ message: 'Iniciativas tiradas para todos', color: 'orange' })
   }, [])
+
+  // ── Start combat ──────────────────────────────────────────────────────────
 
   async function handleStartCombat() {
     if (!combatName.trim()) {
@@ -136,14 +174,9 @@ export default function NewCombatPage() {
     try {
       const combat = await createCombat(combatName.trim())
 
-      // Roll missing initiatives before saving
-      const withInitiative = pending.map((p) => ({
-        ...p,
-        initiative: p.initiative ?? rollInitiative(p.initiativeBonus),
-      }))
-
-      for (const p of withInitiative) {
-        await addParticipant(combat.id, p)
+      for (const p of pending) {
+        const initiative = p.initiative ?? rollInitiative(p.initiativeBonus)
+        await addParticipant(combat.id, { ...p, initiative }, p.characterSheetId)
       }
 
       await setCombatStatus(combat.id, 'active')
@@ -156,8 +189,8 @@ export default function NewCombatPage() {
     }
   }
 
-  const adventurers = pending.filter((p) => p.type === 'adventurer')
-  const monsters = pending.filter((p) => p.type === 'monster')
+  const adventurers = pending.filter(p => p.type === 'adventurer')
+  const monsters    = pending.filter(p => p.type === 'monster')
 
   return (
     <Container size="md" py="xl">
@@ -171,34 +204,33 @@ export default function NewCombatPage() {
           label="Nombre del combate"
           placeholder="Ej: La Posada del Dragón Borracho"
           value={combatName}
-          onChange={(e) => setCombatName(e.currentTarget.value)}
+          onChange={e => setCombatName(e.currentTarget.value)}
           size="md"
         />
 
         <Divider label="Agregar participantes" labelPosition="left" />
 
-        {/* Participant form with type tabs */}
         <Tabs value={activeTab} onChange={setActiveTab}>
           <Tabs.List>
+            <Tabs.Tab value="library" leftSection={<IconBooks size={14} />}>
+              Desde biblioteca
+            </Tabs.Tab>
             <Tabs.Tab value="adventurer" leftSection={<IconUser size={14} />}>
-              Aventurero
+              Aventurero manual
             </Tabs.Tab>
             <Tabs.Tab value="monster" leftSection={<IconSkull size={14} />}>
-              Monstruo
+              Monstruo manual
             </Tabs.Tab>
           </Tabs.List>
 
+          <Tabs.Panel value="library" pt="md">
+            <CharacterPicker onAdd={handleAddFromLibrary} />
+          </Tabs.Panel>
           <Tabs.Panel value="adventurer" pt="md">
-            <ParticipantForm
-              type="adventurer"
-              onSubmit={handleAddParticipant}
-            />
+            <ParticipantForm type="adventurer" onSubmit={handleAddManual} />
           </Tabs.Panel>
           <Tabs.Panel value="monster" pt="md">
-            <ParticipantForm
-              type="monster"
-              onSubmit={handleAddParticipant}
-            />
+            <ParticipantForm type="monster" onSubmit={handleAddManual} />
           </Tabs.Panel>
         </Tabs>
 
@@ -206,9 +238,7 @@ export default function NewCombatPage() {
         {pending.length > 0 && (
           <Stack gap="sm">
             <Group justify="space-between">
-              <Text fw={600} size="sm">
-                Participantes ({pending.length})
-              </Text>
+              <Text fw={600} size="sm">Participantes ({pending.length})</Text>
               <Button
                 variant="light"
                 size="xs"
@@ -225,7 +255,7 @@ export default function NewCombatPage() {
                   <IconShield size={14} color="var(--mantine-color-blue-5)" />
                   <Text size="xs" c="blue" fw={600}>Aventureros</Text>
                 </Group>
-                {adventurers.map((p) => (
+                {adventurers.map(p => (
                   <DraftParticipantCard
                     key={p.tempId}
                     participant={p}
@@ -242,7 +272,7 @@ export default function NewCombatPage() {
                   <IconSkull size={14} color="var(--mantine-color-red-5)" />
                   <Text size="xs" c="red" fw={600}>Monstruos</Text>
                 </Group>
-                {monsters.map((p) => (
+                {monsters.map(p => (
                   <DraftParticipantCard
                     key={p.tempId}
                     participant={p}
@@ -256,9 +286,7 @@ export default function NewCombatPage() {
         )}
 
         <Group justify="flex-end" mt="md">
-          <Button variant="subtle" onClick={() => navigate('/')}>
-            Cancelar
-          </Button>
+          <Button variant="subtle" onClick={() => navigate('/')}>Cancelar</Button>
           <Button
             leftSection={<IconSword size={18} />}
             rightSection={<IconArrowRight size={16} />}

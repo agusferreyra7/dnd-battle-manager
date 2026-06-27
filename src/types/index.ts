@@ -1,33 +1,81 @@
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
 export type ParticipantType = 'adventurer' | 'monster'
-
+export type CharacterSheetType = 'adventurer' | 'npc' | 'monster'
 export type CombatStatus = 'setup' | 'active' | 'ended'
-
 export type LogEventType = 'damage' | 'heal' | 'death' | 'revive' | 'condition_add' | 'condition_remove' | 'turn_start' | 'round_start'
 
 export type Condition =
-  | 'blinded'
-  | 'charmed'
-  | 'deafened'
-  | 'exhaustion'
-  | 'frightened'
-  | 'grappled'
-  | 'incapacitated'
-  | 'invisible'
-  | 'paralyzed'
-  | 'petrified'
-  | 'poisoned'
-  | 'prone'
-  | 'restrained'
-  | 'stunned'
-  | 'unconscious'
+  | 'blinded' | 'charmed' | 'deafened' | 'exhaustion' | 'frightened'
+  | 'grappled' | 'incapacitated' | 'invisible' | 'paralyzed' | 'petrified'
+  | 'poisoned' | 'prone' | 'restrained' | 'stunned' | 'unconscious'
 
-// ─── Death saving throws (adventurers only) ───────────────────────────────────
+export type Alignment =
+  | 'Lawful Good' | 'Neutral Good' | 'Chaotic Good'
+  | 'Lawful Neutral' | 'True Neutral' | 'Chaotic Neutral'
+  | 'Lawful Evil' | 'Neutral Evil' | 'Chaotic Evil'
+  | 'Unaligned'
+
+export type DndClass =
+  | 'Barbarian' | 'Bard' | 'Cleric' | 'Druid' | 'Fighter'
+  | 'Monk' | 'Paladin' | 'Ranger' | 'Rogue' | 'Sorcerer'
+  | 'Warlock' | 'Wizard'
+
+// ─── Ability scores ───────────────────────────────────────────────────────────
+
+export interface AbilityScores {
+  strength: number
+  dexterity: number
+  constitution: number
+  intelligence: number
+  wisdom: number
+  charisma: number
+}
+
+// ─── Spell slots per level ────────────────────────────────────────────────────
+
+export interface SpellSlots {
+  1: number; 2: number; 3: number; 4: number; 5: number
+  6: number; 7: number; 8: number; 9: number
+}
+
+// ─── Limited-use features (short/long rest) ───────────────────────────────────
+
+export interface LimitedFeature {
+  name: string
+  uses: number
+  recharge: 'short' | 'long'
+}
+
+// ─── Death saving throws (adventurers in combat only) ─────────────────────────
 
 export interface DeathSaves {
-  successes: number   // 0–3
-  failures: number    // 0–3
+  successes: number
+  failures: number
+}
+
+// ─── Character Sheet — persistent entity (not tied to a combat) ──────────────
+
+export interface CharacterSheet {
+  id: string
+  type: CharacterSheetType
+  name: string
+  maxHp: number
+  armorClass: number
+  createdAt: Date
+  updatedAt: Date
+
+  // Optional shared
+  abilityScores: AbilityScores | null
+  alignment: Alignment | null
+  notes: string
+
+  // Adventurer-only
+  className: DndClass | null
+  subClass: string | null
+  level: number | null
+  spellSlots: SpellSlots | null          // computed from class+level, stored for display
+  limitedFeatures: LimitedFeature[]      // class features with limited uses
 }
 
 // ─── Open5e API types ─────────────────────────────────────────────────────────
@@ -58,7 +106,7 @@ export interface Open5eMonster {
   legendary_actions: { name: string; desc: string }[]
   senses: string
   languages: string
-  document__title: string   // source book
+  document__title: string
 }
 
 export interface Open5eSearchResult {
@@ -68,7 +116,7 @@ export interface Open5eSearchResult {
   results: Open5eMonster[]
 }
 
-// ─── Core models (stored in IndexedDB via Dexie) ─────────────────────────────
+// ─── Core combat models ───────────────────────────────────────────────────────
 
 export interface Combat {
   id: string
@@ -83,6 +131,8 @@ export interface Combat {
 export interface Participant {
   id: string
   combatId: string
+  // If participant was added from a CharacterSheet, store the reference
+  characterSheetId: string | null
   type: ParticipantType
   name: string
   maxHp: number

@@ -91,3 +91,19 @@ export function useAliveCount(combatId: string): number | undefined {
     [combatId]
   )
 }
+
+// ─── Character sheets ─────────────────────────────────────────────────────────
+
+export function useAllCharacterSheets() {
+  return useLiveQuery(
+    () => db.characterSheets.orderBy('createdAt').reverse().toArray(),
+    []
+  )
+}
+
+export function useCharacterSheet(id: string | null) {
+  return useLiveQuery(
+    () => id ? db.characterSheets.get(id) : Promise.resolve(undefined),
+    [id]
+  )
+}

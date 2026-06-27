@@ -5,8 +5,10 @@ import type {
   CombatStatus,
   CombatLogEntry,
   Participant,
+  ParticipantType,
   ParticipantFormValues,
   Condition,
+  CharacterSheet,
 } from '@/types'
 
 // ─── Combat CRUD ──────────────────────────────────────────────────────────────
@@ -53,7 +55,8 @@ export async function getAllCombats(): Promise<Combat[]> {
 
 export async function addParticipant(
   combatId: string,
-  formValues: ParticipantFormValues
+  formValues: ParticipantFormValues,
+  characterSheetId: string | null = null
 ): Promise<Participant> {
   const now = new Date()
   const existingCount = await db.participants.where('combatId').equals(combatId).count()
@@ -61,6 +64,7 @@ export async function addParticipant(
   const participant: Participant = {
     id: uuidv4(),
     combatId,
+    characterSheetId,
     type: formValues.type,
     name: formValues.name,
     maxHp: formValues.maxHp,
@@ -80,6 +84,33 @@ export async function addParticipant(
 
   await db.participants.add(participant)
   return participant
+}
+
+/** Add a participant directly from a saved CharacterSheet. */
+export async function addParticipantFromSheet(
+  combatId: string,
+  sheet: CharacterSheet,
+  initiative: number
+): Promise<Participant> {
+  const dexMod = sheet.abilityScores
+    ? Math.floor((sheet.abilityScores.dexterity - 10) / 2)
+    : 0
+
+  const type: ParticipantType = sheet.type === 'adventurer' ? 'adventurer' : 'monster'
+
+  return addParticipant(
+    combatId,
+    {
+      name:            sheet.name,
+      type,
+      maxHp:           sheet.maxHp,
+      armorClass:      sheet.armorClass,
+      initiativeBonus: dexMod,
+      initiative,
+      notes:           sheet.notes,
+    },
+    sheet.id
+  )
 }
 
 export async function updateParticipant(
@@ -359,4 +390,34 @@ export async function rollAllInitiatives(combatId: string): Promise<void> {
 
 export async function setCombatStatus(id: string, status: CombatStatus): Promise<void> {
   await updateCombat(id, { status })
+}
+
+// ─── Character Sheet CRUD ─────────────────────────────────────────────────────
+
+export async function createCharacterSheet(
+  data: Omit<CharacterSheet, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<CharacterSheet> {
+  const now = new Date()
+  const sheet: CharacterSheet = { ...data, id: uuidv4(), createdAt: now, updatedAt: now }
+  await db.characterSheets.add(sheet)
+  return sheet
+}
+
+export async function updateCharacterSheet(
+  id: string,
+  changes: Partial<Omit<CharacterSheet, 'id' | 'createdAt'>>
+): Promise<void> {
+  await db.characterSheets.update(id, { ...changes, updatedAt: new Date() })
+}
+
+export async function deleteCharacterSheet(id: string): Promise<void> {
+  await db.characterSheets.delete(id)
+}
+
+export async function getAllCharacterSheets(): Promise<CharacterSheet[]> {
+  return db.characterSheets.orderBy('createdAt').reverse().toArray()
+}
+
+export async function getCharacterSheet(id: string): Promise<CharacterSheet | undefined> {
+  return db.characterSheets.get(id)
 }
