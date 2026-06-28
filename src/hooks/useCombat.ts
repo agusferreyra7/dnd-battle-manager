@@ -1,6 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '@/db/schema'
-import type { Combat, Participant, ParticipantWithStatus } from '@/types'
+import type { Combat, Participant, ParticipantWithStatus, CharacterSheet, ResourceTracker } from '@/types'
 
 // ─── All combats (for home page list) ────────────────────────────────────────
 
@@ -92,18 +92,31 @@ export function useAliveCount(combatId: string): number | undefined {
   )
 }
 
-// ─── Character sheets ─────────────────────────────────────────────────────────
+// ─── Resource tracker ─────────────────────────────────────────────────────────
 
-export function useAllCharacterSheets() {
+export function useResourceTracker(participantId: string | null): ResourceTracker | undefined {
+  return useLiveQuery(
+    async () => {
+      if (!participantId) return undefined
+      return db.resourceTrackers.get(participantId)
+    },
+    [participantId]
+  )
+}
+
+export function useAllCharacterSheets(): CharacterSheet[] | undefined {
   return useLiveQuery(
     () => db.characterSheets.orderBy('createdAt').reverse().toArray(),
     []
   )
 }
 
-export function useCharacterSheet(id: string | null) {
+export function useCharacterSheet(id: string | null): CharacterSheet | undefined {
   return useLiveQuery(
-    () => id ? db.characterSheets.get(id) : Promise.resolve(undefined),
+    async () => {
+      if (!id) return undefined
+      return db.characterSheets.get(id)
+    },
     [id]
   )
 }

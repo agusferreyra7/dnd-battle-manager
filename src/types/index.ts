@@ -47,6 +47,26 @@ export interface LimitedFeature {
   recharge: 'short' | 'long'
 }
 
+// ─── Resource tracker — tracks spell slot and feature usage in a combat ───────
+
+export interface SlotUsage {
+  [level: number]: number   // how many slots of this level have been USED (spent)
+}
+
+export interface FeatureUsage {
+  [featureName: string]: number   // how many uses of this feature have been spent
+}
+
+export interface ResourceTracker {
+  id: string                        // same as participantId (1:1)
+  participantId: string
+  combatId: string
+  // Spell slots: how many of each level have been USED (not remaining)
+  usedSlots: SlotUsage
+  // Limited features: how many uses spent
+  usedFeatures: FeatureUsage
+}
+
 // ─── Death saving throws (adventurers in combat only) ─────────────────────────
 
 export interface DeathSaves {
@@ -70,12 +90,19 @@ export interface CharacterSheet {
   alignment: Alignment | null
   notes: string
 
+  // Race — adventurers use SRD races + custom; NPCs use broader list
+  race: string | null           // selected from list or typed freely (adventurer custom)
+  racialTraits: LimitedFeature[]  // derived from race, stored for combat use
+
   // Adventurer-only
   className: DndClass | null
   subClass: string | null
   level: number | null
-  spellSlots: SpellSlots | null          // computed from class+level, stored for display
-  limitedFeatures: LimitedFeature[]      // class features with limited uses
+  spellSlots: SpellSlots | null
+  limitedFeatures: LimitedFeature[]
+
+  // NPC-only
+  npcClassName: string | null     // free-text class for NPCs
 }
 
 // ─── Open5e API types ─────────────────────────────────────────────────────────

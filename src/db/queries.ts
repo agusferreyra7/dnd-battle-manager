@@ -9,6 +9,7 @@ import type {
   ParticipantFormValues,
   Condition,
   CharacterSheet,
+  ResourceTracker,
 } from '@/types'
 
 // ─── Combat CRUD ──────────────────────────────────────────────────────────────
@@ -283,6 +284,33 @@ export async function applyHeal(
   })
 }
 
+/** Add temporary HP to a participant. Temp HP don't stack — only the higher value is kept. */
+export async function applyTempHp(
+  participant: Participant,
+  amount: number,
+  combatRound: number,
+  turnIndex: number
+): Promise<void> {
+  // D&D 5e rule: temp HP don't stack; take the higher value
+  const newTempHp = Math.max(participant.temporaryHp, amount)
+  const actually  = newTempHp - participant.temporaryHp  // net change (may be 0 if existing is higher)
+
+  await db.participants.update(participant.id, { temporaryHp: newTempHp })
+
+  await addLogEntry({
+    combatId: participant.combatId,
+    round: combatRound,
+    turnIndex,
+    event: 'heal',
+    actorId: null,
+    targetId: participant.id,
+    value: amount,
+    description: actually > 0
+      ? `${participant.name} recibió ${amount} HP temporales (total: ${newTempHp})`
+      : `${participant.name} ya tiene ${participant.temporaryHp} HP temporales (${amount} ignorados)`,
+  })
+}
+
 // ─── Death saving throws ──────────────────────────────────────────────────────
 
 export async function registerDeathSave(
@@ -420,4 +448,130 @@ export async function getAllCharacterSheets(): Promise<CharacterSheet[]> {
 
 export async function getCharacterSheet(id: string): Promise<CharacterSheet | undefined> {
   return db.characterSheets.get(id)
+}
+
+// ─── Resource Tracker (spell slots + feature uses in combat) ──────────────────
+
+export async function getOrCreateResourceTracker(
+  participantId: string,
+  combatId: string
+): Promise<ResourceTracker> {
+  const existing = await db.resourceTrackers.get(participantId)
+  if (existing) return existing
+
+  const tracker: ResourceTracker = {
+    id: participantId,          // 1:1 with participant — same id for simplicity
+    participantId,
+    combatId,
+    usedSlots: {},
+    usedFeatures: {},
+  }
+  await db.resourceTrackers.add(tracker)
+  return tracker
+}
+
+/** Spend one slot of the given spell level. No-op if already at max. */
+export async function spendSpellSlot(
+  participantId: string,
+  combatId: string,
+  level: number,
+  maxSlots: number
+): Promise<void> {
+  const tracker = await getOrCreateResourceTracker(participantId, combatId)
+  const current = tracker.usedSlots[level] ?? 0
+  if (current >= maxSlots) return
+  await db.resourceTrackers.update(participantId, {
+    usedSlots: { ...tracker.usedSlots, [level]: current + 1 },
+  })
+}
+
+/** Recover one slot of the given spell level (un-spend). */
+export async function recoverSpellSlot(
+  participantId: string,
+  combatId: string,
+  level: number
+): Promise<void> {
+  const tracker = await getOrCreateResourceTracker(participantId, combatId)
+  const current = tracker.usedSlots[level] ?? 0
+  if (current <= 0) return
+  await db.resourceTrackers.update(participantId, {
+    usedSlots: { ...tracker.usedSlots, [level]: current - 1 },
+  })
+}
+
+/** Spend one use of a limited feature. No-op if already exhausted. */
+export async function spendFeatureUse(
+  participantId: string,
+  combatId: string,
+  featureName: string,
+  maxUses: number
+): Promise<void> {
+  const tracker = await getOrCreateResourceTracker(participantId, combatId)
+  const current = tracker.usedFeatures[featureName] ?? 0
+  if (maxUses > 0 && current >= maxUses) return
+  await db.resourceTrackers.update(participantId, {
+    usedFeatures: { ...tracker.usedFeatures, [featureName]: current + 1 },
+  })
+}
+
+/** Recover one use of a limited feature. */
+export async function recoverFeatureUse(
+  participantId: string,
+  combatId: string,
+  featureName: string
+): Promise<void> {
+  const tracker = await getOrCreateResourceTracker(participantId, combatId)
+  const current = tracker.usedFeatures[featureName] ?? 0
+  if (current <= 0) return
+  await db.resourceTrackers.update(participantId, {
+    usedFeatures: { ...tracker.usedFeatures, [featureName]: current - 1 },
+  })
+}
+
+/** Reset all resource usage for a participant (e.g. after a long rest). */
+export async function resetResourceTracker(participantId: string): Promise<void> {
+  await db.resourceTrackers.update(participantId, {
+    usedSlots: {},
+    usedFeatures: {},
+  })
+}
+
+// ─── Tie-break resolution ─────────────────────────────────────────────────────
+
+/** Returns groups of alive participants that share the same initiative value (ties). */
+export async function getTieGroups(combatId: string): Promise<Participant[][]> {
+  const all = await db.participants
+    .where('combatId')
+    .equals(combatId)
+    .toArray()
+
+  const alive = all.filter(p => p.isAlive)
+
+  // Group by initiative
+  const byInit: Record<number, Participant[]> = {}
+  for (const p of alive) {
+    if (!byInit[p.initiative]) byInit[p.initiative] = []
+    byInit[p.initiative].push(p)
+  }
+
+  // Only return groups with 2+ participants
+  return Object.values(byInit)
+    .filter(group => group.length >= 2)
+    .sort((a, b) => b[0].initiative - a[0].initiative)
+}
+
+/**
+ * Write the resolved order for a tie group.
+ * `orderedIds` is the full ordered list of participant IDs for that initiative value,
+ * from first to last. We assign sortOrder 0, 1, 2... accordingly.
+ */
+export async function resolveTieGroup(
+  orderedIds: string[],
+  baseOrder: number
+): Promise<void> {
+  await db.transaction('rw', db.participants, async () => {
+    for (let i = 0; i < orderedIds.length; i++) {
+      await db.participants.update(orderedIds[i], { sortOrder: baseOrder + i })
+    }
+  })
 }

@@ -33,8 +33,8 @@ export default function CharacterSheetCard({ sheet, onEdit }: CharacterSheetCard
     notifications.show({ message: `${sheet.name} eliminado`, color: 'red' })
   }
 
-  const hasExtra = sheet.abilityScores || sheet.alignment || sheet.notes
-    || sheet.spellSlots || sheet.limitedFeatures?.length > 0
+  const hasExtra = sheet.abilityScores || sheet.alignment || sheet.notes || sheet.race
+    || sheet.spellSlots || sheet.limitedFeatures?.length > 0 || sheet.racialTraits?.length > 0
 
   return (
     <Card withBorder padding="sm" radius="md">
@@ -50,6 +50,14 @@ export default function CharacterSheetCard({ sheet, onEdit }: CharacterSheetCard
                   <Badge color="gray" variant="dot" size="xs">
                     {sheet.className}{sheet.level ? ` ${sheet.level}` : ''}
                   </Badge>
+                )}
+                {sheet.type === 'npc' && sheet.npcClassName && (
+                  <Badge color="gray" variant="dot" size="xs">
+                    {sheet.npcClassName}{sheet.level ? ` ${sheet.level}` : ''}
+                  </Badge>
+                )}
+                {sheet.race && (
+                  <Badge color="violet" variant="light" size="xs">{sheet.race}</Badge>
                 )}
                 {sheet.alignment && (
                   <Badge color="gray" variant="outline" size="xs">{sheet.alignment}</Badge>
@@ -115,6 +123,11 @@ export default function CharacterSheetCard({ sheet, onEdit }: CharacterSheetCard
             {/* Sub-class */}
             {sheet.subClass && (
               <Text size="xs" c="dimmed">Sub-clase: <strong>{sheet.subClass}</strong></Text>
+            )}
+
+            {/* Racial traits */}
+            {sheet.racialTraits?.length > 0 && (
+              <LimitedFeaturesDisplay features={sheet.racialTraits} />
             )}
 
             {/* Spell slots */}
